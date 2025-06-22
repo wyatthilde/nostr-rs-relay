@@ -979,11 +979,13 @@ fn query_from_filter(f: &ReqFilter) -> (String, Vec<Box<dyn ToSql>>, Option<Stri
         .as_ref()
         .map_or_else(|| "".to_owned(), |i| format!("INDEXED BY {i}"));
     let mut query = format!("SELECT e.content FROM event e {idx_stmt}");
+
     // query parameters for SQLite
     let mut params: Vec<Box<dyn ToSql>> = vec![];
 
     // individual filter components (single conditions such as an author or event ID)
     let mut filter_components: Vec<String> = Vec::new();
+
     // Query for "authors", allowing prefix matches
     if let Some(authvec) = &f.authors {
         // take each author and convert to a hexsearch
@@ -1000,6 +1002,7 @@ fn query_from_filter(f: &ReqFilter) -> (String, Vec<Box<dyn ToSql>>, Option<Stri
             filter_components.push("false".to_owned());
         }
     }
+
     // Query for Kind
     if let Some(ks) = &f.kinds {
         // kind is number, no escaping needed
@@ -1007,6 +1010,7 @@ fn query_from_filter(f: &ReqFilter) -> (String, Vec<Box<dyn ToSql>>, Option<Stri
         let kind_clause = format!("kind IN ({})", str_kinds.join(", "));
         filter_components.push(kind_clause);
     }
+
     // Query for event, allowing prefix matches
     if let Some(idvec) = &f.ids {
         // take each author and convert to a hexsearch
@@ -1025,6 +1029,7 @@ fn query_from_filter(f: &ReqFilter) -> (String, Vec<Box<dyn ToSql>>, Option<Stri
             filter_components.push(id_clause);
         }
     }
+
     // Query for tags
     if let Some(map) = &f.tags {
         for (key, val) in map.iter() {
@@ -1068,26 +1073,39 @@ fn query_from_filter(f: &ReqFilter) -> (String, Vec<Box<dyn ToSql>>, Option<Stri
             filter_components.push(tag_clause);
         }
     }
+
     // Query for timestamp
     if f.since.is_some() {
         let created_clause = format!("created_at >= {}", f.since.unwrap());
         filter_components.push(created_clause);
     }
+
     // Query for timestamp
     if f.until.is_some() {
         let until_clause = format!("created_at <= {}", f.until.unwrap());
         filter_components.push(until_clause);
     }
+    
+    // Query for search
+    if let Some(search) = &f.search {
+        let search_param = format!("%{}%", search.replace('%', "\\%").replace('_', "\\_"));
+        filter_components.push("content LIKE ? ESCAPE '\\'".to_string());
+        params.push(Box::new(search_param));
+    }
+
     // never display hidden events
-    query.push_str(" WHERE hidden!=TRUE");
+    query.push_str(" WHERE hidden!=TRUEReq");
+
     // never display hidden events
     filter_components.push("(expires_at IS NULL OR expires_at > ?)".to_string());
     params.push(Box::new(unix_time()));
+
     // build filter component conditions
     if !filter_components.is_empty() {
         query.push_str(" AND ");
         query.push_str(&filter_components.join(" AND "));
     }
+
     // Apply per-filter limit to this subquery.
     // The use of a LIMIT implies a DESC order, to capture only the most recent events.
     if let Some(lim) = f.limit {

@@ -41,6 +41,7 @@ pub struct ReqFilter {
     // erroneously match.  This basically indicates the req tried to
     // do something invalid.
     pub force_no_match: bool,
+    pub search: Option<String>,
 }
 
 impl Serialize for ReqFilter {
@@ -66,6 +67,9 @@ impl Serialize for ReqFilter {
         }
         if let Some(authors) = &self.authors {
             map.serialize_entry("authors", &authors)?;
+        }
+        if let Some(search) = &self.search {
+            map.serialize_entry("search", search)?;
         }
         // serialize tags
         if let Some(tags) = &self.tags {
@@ -124,6 +128,8 @@ impl<'de> Deserialize<'de> for ReqFilter {
                 rf.until = Deserialize::deserialize(val).ok();
             } else if key == "limit" {
                 rf.limit = Deserialize::deserialize(val).ok();
+            } else if key == "search" { 
+                rf.search = Deserialize::deserialize(val).ok();
             } else if key == "authors" {
                 let raw_authors: Option<Vec<String>> = Deserialize::deserialize(val).ok();
                 if let Some(a) = raw_authors.as_ref() {
