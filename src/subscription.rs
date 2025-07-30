@@ -101,6 +101,7 @@ impl<'de> Deserialize<'de> for ReqFilter {
             until: None,
             authors: None,
             limit: None,
+            search: None,
             tags: None,
             force_no_match: false,
         };
@@ -128,7 +129,7 @@ impl<'de> Deserialize<'de> for ReqFilter {
                 rf.until = Deserialize::deserialize(val).ok();
             } else if key == "limit" {
                 rf.limit = Deserialize::deserialize(val).ok();
-            } else if key == "search" { 
+            } else if key == "search" {
                 rf.search = Deserialize::deserialize(val).ok();
             } else if key == "authors" {
                 let raw_authors: Option<Vec<String>> = Deserialize::deserialize(val).ok();
@@ -343,6 +344,16 @@ impl ReqFilter {
         self.kinds.as_ref().map_or(true, |ks| ks.contains(&kind))
     }
 
+    fn search_match(&self, event: &Event) -> bool {
+        if let Some(search) = &self.search {
+            // If search is defined, we check if the content contains the search term
+            event.content.contains(search)
+        } else {
+            // If no search term is defined, we consider it a match
+            true
+        }
+    }
+
     /// Determine if all populated fields in this filter match the provided event.
     #[must_use]
     pub fn interested_in_event(&self, event: &Event) -> bool {
@@ -353,6 +364,7 @@ impl ReqFilter {
             && self.kind_match(event.kind)
             && (self.authors_match(event) || self.delegated_authors_match(event))
             && self.tag_match(event)
+            && self.search_match(event)
             && !self.force_no_match
     }
 }
@@ -449,6 +461,7 @@ mod tests {
             delegated_by: None,
             created_at: 0,
             kind: 0,
+
             tags: Vec::new(),
             content: "".to_owned(),
             sig: "".to_owned(),
@@ -467,6 +480,7 @@ mod tests {
             pubkey: "".to_owned(),
             delegated_by: None,
             created_at: 0,
+
             kind: 0,
             tags: Vec::new(),
             content: "".to_owned(),
@@ -487,6 +501,7 @@ mod tests {
             delegated_by: None,
             created_at: 0,
             kind: 0,
+
             tags: Vec::new(),
             content: "".to_owned(),
             sig: "".to_owned(),
@@ -507,6 +522,7 @@ mod tests {
             delegated_by: None,
             created_at: 50,
             kind: 0,
+
             tags: Vec::new(),
             content: "".to_owned(),
             sig: "".to_owned(),
@@ -530,6 +546,7 @@ mod tests {
             pubkey: "".to_owned(),
             delegated_by: None,
             created_at: 150,
+
             kind: 0,
             tags: Vec::new(),
             content: "".to_owned(),
@@ -553,6 +570,7 @@ mod tests {
             delegated_by: None,
             created_at: 50,
             kind: 0,
+
             tags: Vec::new(),
             content: "".to_owned(),
             sig: "".to_owned(),
@@ -572,6 +590,7 @@ mod tests {
             delegated_by: None,
             created_at: 1001,
             kind: 0,
+
             tags: Vec::new(),
             content: "".to_owned(),
             sig: "".to_owned(),
@@ -591,6 +610,7 @@ mod tests {
             delegated_by: None,
             created_at: 0,
             kind: 0,
+
             tags: Vec::new(),
             content: "".to_owned(),
             sig: "".to_owned(),
@@ -610,6 +630,7 @@ mod tests {
             delegated_by: None,
             created_at: 0,
             kind: 0,
+
             tags: Vec::new(),
             content: "".to_owned(),
             sig: "".to_owned(),
@@ -629,6 +650,7 @@ mod tests {
             delegated_by: None,
             created_at: 0,
             kind: 0,
+
             tags: Vec::new(),
             content: "".to_owned(),
             sig: "".to_owned(),
@@ -648,6 +670,7 @@ mod tests {
             delegated_by: None,
             created_at: 0,
             kind: 0,
+
             tags: Vec::new(),
             content: "".to_owned(),
             sig: "".to_owned(),

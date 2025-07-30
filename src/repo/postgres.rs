@@ -917,6 +917,7 @@ mod tests {
                 "84de35e2584d2b144aae823c9ed0b0f3deda09648530b93d1a2a146d1dea9864".to_owned(),
             ]),
             limit: None,
+            search: None,
             tags: Some(HashMap::from([(
                 'p',
                 HashSet::from([
@@ -937,6 +938,7 @@ mod tests {
             kinds: Some(vec![1000]),
             since: None,
             until: None,
+            search: None,
             authors: Some(vec![
                 "84de35e2584d2b144aae823c9ed0b0f3deda09648530b93d1a2a146d1dea9864".to_owned(),
             ]),
@@ -956,6 +958,7 @@ mod tests {
             kinds: Some(vec![1000]),
             since: None,
             until: None,
+            search: None,
             authors: Some(vec![
                 "84de35e2584d2b144aae823c9ed0b0f3deda09648530b93d1a2a146d1dea9864".to_owned(),
             ]),
@@ -983,6 +986,7 @@ mod tests {
             until: None,
             authors: None,
             limit: None,
+            search: None,
             tags: Some(HashMap::from([
                 ('d', HashSet::from(["follow".to_owned()])),
                 ('t', HashSet::from(["siamstr".to_owned()])),
@@ -1000,6 +1004,7 @@ mod tests {
             kinds: Some(vec![1, 6, 16, 30023, 1063, 6969]),
             since: Some(1700697846),
             until: None,
+            search: None,
             authors: None,
             limit: None,
             tags: Some(HashMap::from([('a', HashSet::new())])),

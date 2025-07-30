@@ -77,3 +77,71 @@ async fn publish_test() -> Result<()> {
     let _res = relay.shutdown_tx.send(());
     Ok(())
 }
+
+#[tokio::test]
+async fn search_nip50_test() -> anyhow::Result<()> {
+    use serde_json::json;
+    use futures::SinkExt;
+    use futures::StreamExt;
+    use tokio_tungstenite::connect_async;
+    use std::time::Duration;
+    use tokio::time::timeout;
+    use nostr::{EventBuilder, Keys, Kind};
+    use tokio::time::Instant;
+
+    // Start relay
+    let relay = common::start_relay()?;
+    common::wait_for_healthy_relay(&relay).await?;
+    let port = relay.port;
+
+    // Generate a valid event using nostr crate
+    let unique_content = "nip50searchtest-unique-12345";
+    let keys = Keys::generate();
+    let unsigned = EventBuilder::new(Kind::TextNote, unique_content);
+    let event = unsigned.sign(&keys).await?;
+    let event_json = json!(["EVENT", event]);
+
+    // Open websocket and publish the event
+    let (mut ws, _) = connect_async(format!("ws://localhost:{}", port)).await?;
+    ws.send(event_json.to_string().into()).await?;
+    // Wait for OK response
+    let publish_response = ws.next().await;
+    println!("Publish response: {:?}", publish_response);
+    ws.close(None).await?;
+
+    // Wait a bit to ensure the event is indexed
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    // Open a new websocket connection for search
+    let (mut search_ws, _) = connect_async(format!("ws://localhost:{}", port)).await?;
+    // NIP-50 search REQ
+    let search_req = json!([
+        "REQ",
+        "search1",
+        { "search": unique_content, "kinds": [1] }
+    ]);
+    search_ws.send(search_req.to_string().into()).await?;
+
+    // Wait for the event response (with timeout)
+    let start = Instant::now();
+    let mut found = false;
+    let mut all_responses = Vec::new();
+    while start.elapsed() < Duration::from_secs(2) {
+        if let Ok(Some(Ok(msg))) = timeout(Duration::from_millis(200), search_ws.next()).await {
+            let text = msg.into_text().unwrap_or_default();
+            println!("Search response: {}", text);
+            all_responses.push(text.clone());
+            if text.contains(unique_content) {
+                found = true;
+                break;
+            }
+        } else {
+            break;
+        }
+    }
+    assert!(found, "Search did not return the expected event. All responses: {:?}", all_responses);
+
+    // Clean up
+    let _ = relay.shutdown_tx.send(());
+    Ok(())
+}
