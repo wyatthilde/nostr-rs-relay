@@ -4,11 +4,11 @@ use crate::payment::cln_rest::ClnRestPaymentProcessor;
 use crate::payment::lnbits::LNBitsPaymentProcessor;
 use crate::repo::NostrRepo;
 use serde::{Deserialize, Serialize};
+use std::str::FromStr;
 use std::sync::Arc;
 use tracing::{info, warn};
 
 use async_trait::async_trait;
-use nostr::key::{FromPkStr, FromSkStr};
 use nostr::{key::Keys, Event as NostrEvent, EventBuilder};
 
 pub mod cln_rest;
@@ -106,7 +106,7 @@ impl Payment {
 
         // Create nostr key from sk string
         let nostr_keys = if let Some(secret_key) = &settings.pay_to_relay.secret_key {
-            Some(Keys::from_sk_str(secret_key)?)
+            Some(Keys::from_str(secret_key)?)
         } else {
             None
         };
@@ -154,7 +154,7 @@ impl Payment {
                     // Gets the most recent unpaid invoice from database
                     // Checks LNbits to verify if paid/unpaid
                     Ok(PaymentMessage::CheckAccount(pubkey)) => {
-                        let keys = Keys::from_pk_str(&pubkey)?;
+                        let keys = Keys::from_str(&pubkey)?;
 
                         if let Ok(Some(invoice_info)) = self.repo.get_unpaid_invoice(&keys).await {
                             match self.check_invoice_status(&invoice_info.payment_hash).await? {
@@ -178,7 +178,7 @@ impl Payment {
                                 .update_invoice(&payment_hash, InvoiceStatus::Paid)
                                 .await?;
 
-                            let key = Keys::from_pk_str(&pubkey)?;
+                            let key = Keys::from_str(&pubkey)?;
                             self.repo.admit_account(&key, self.settings.pay_to_relay.admission_cost).await?;
                         }
                     }
@@ -196,44 +196,53 @@ impl Payment {
 
     /// Sends Nostr DM to pubkey that requested invoice
     /// Two events the terms followed by the bolt11 invoice
-    pub async fn send_admission_message(
-        &self,
-        pubkey: &str,
-        invoice_info: &InvoiceInfo,
-    ) -> Result<()> {
-        let nostr_keys = match &self.nostr_keys {
-            Some(key) => key,
-            None => return Err(Error::CustomError("Nostr key not defined".to_string())),
-        };
+    // pub async fn send_admission_message(
+    //     &self,
+    //     pubkey: &str,
+    //     invoice_info: &InvoiceInfo,
+    // ) -> Result<()> {
+    //     let nostr_keys = match &self.nostr_keys {
+    //         Some(key) => key,
+    //         None => return Err(Error::CustomError("Nostr key not defined".to_string())),
+    //     };
 
-        // Create Nostr key from pk
-        let key = Keys::from_pk_str(pubkey)?;
+    //     let recipient_key = Keys::from_str(pubkey)?;
+    //     let recipient_pubkey = recipient_key.public_key();
 
-        let pubkey = key.public_key();
+    //     // Encrypt the terms message
+    //     let terms_ciphertext = nostr::nip04::encrypt(
+    //         &nostr_keys.secret_key(),
+    //         &recipient_pubkey,
+    //         &self.settings.pay_to_relay.terms_message,
+    //     )?;
 
-        // Event DM with terms of service
-        let message_event: NostrEvent = EventBuilder::new_encrypted_direct_msg(
-            nostr_keys,
-            pubkey,
-            &self.settings.pay_to_relay.terms_message,
-        )?
-        .to_event(nostr_keys)?;
+    //     let message_event = EventBuilder::new(
+    //         nostr::Kind::EncryptedDirectMessage,
+    //         terms_ciphertext,
+    //     ).to_event(nostr_keys)?;
 
-        // Event DM with invoice
-        let invoice_event: NostrEvent =
-            EventBuilder::new_encrypted_direct_msg(nostr_keys, pubkey, &invoice_info.bolt11)?
-                .to_event(nostr_keys)?;
+    //     // Encrypt the invoice message
+    //     let invoice_ciphertext = nostr::nip04::encrypt(
+    //         &nostr_keys.secret_key(),
+    //         &recipient_pubkey,
+    //         &invoice_info.bolt11,
+    //     )?;
 
-        // Persist DM events to DB
-        self.repo.write_event(&message_event.clone().into()).await?;
-        self.repo.write_event(&invoice_event.clone().into()).await?;
+    //     let invoice_event = EventBuilder::new(
+    //         nostr::Kind::EncryptedDirectMessage,
+    //         invoice_ciphertext,
+    //     ).to_event(nostr_keys)?;
 
-        // Broadcast DM events
-        self.event_tx.send(message_event.clone().into()).ok();
-        self.event_tx.send(invoice_event.clone().into()).ok();
+    //     // Persist DM events to DB
+    //     self.repo.write_event(&message_event.clone().into()).await?;
+    //     self.repo.write_event(&invoice_event.clone().into()).await?;
 
-        Ok(())
-    }
+    //     // Broadcast DM events
+    //     self.event_tx.send(message_event.clone().into()).ok();
+    //     self.event_tx.send(invoice_event.clone().into()).ok();
+
+    //     Ok(())
+    // }
 
     /// Get Invoice Info
     /// If the has an active invoice that will be return
@@ -243,14 +252,14 @@ impl Payment {
         // This avoids recreating admission invoices
         // I think it will continue to send DMs with the invoice
         // If client continues to try and write to the relay (will be same invoice)
-        let key = Keys::from_pk_str(pubkey)?;
+        let key = Keys::from_str(pubkey)?;
         if !self.repo.create_account(&key).await? {
             if let Ok(Some(invoice_info)) = self.repo.get_unpaid_invoice(&key).await {
                 return Ok(invoice_info);
             }
         }
 
-        let key = Keys::from_pk_str(pubkey)?;
+        let key = Keys::from_str(pubkey)?;
 
         let invoice_info = self.processor.get_invoice(&key, amount).await?;
 
@@ -259,10 +268,10 @@ impl Payment {
             .create_invoice_record(&key, invoice_info.clone())
             .await?;
 
-        if self.settings.pay_to_relay.direct_message {
-            // Admission event invoice and terms to pubkey that is joining
-            self.send_admission_message(pubkey, &invoice_info).await?;
-        }
+        // if self.settings.pay_to_relay.direct_message {
+        //     // Admission event invoice and terms to pubkey that is joining
+        //     self.send_admission_message(pubkey, &invoice_info).await?;
+        // }
 
         Ok(invoice_info)
     }

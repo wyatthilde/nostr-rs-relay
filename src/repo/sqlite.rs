@@ -400,10 +400,22 @@ impl NostrRepo for SqliteRepo {
                     // make the actual SQL query (with parameters inserted) available
                     conn.trace(Some(|x| trace!("SQL trace: {:?}", x)));
                     let mut stmt = conn.prepare_cached(&q)?;
+                    debug!("Prepared SQL statement successfully (cid: {})", client_id);
+                    debug!("Literal SQL statement: {} (cid: {})", q, client_id);
+                    
+                    // Debug log the parameter values being passed to SQLite
+                    debug!("Parameter count: {} (cid: {})", p.len(), client_id);
+                    for (i, _param) in p.iter().enumerate() {
+                        debug!("Parameter {} exists (cid: {})", i, client_id);
+                    }
+                    
                     let mut event_rows = stmt.query(rusqlite::params_from_iter(p))?;
+                    debug!("Executed query, starting row iteration (cid: {})", client_id);
 
                     let mut first_result = true;
+                    debug!("Starting row iteration loop (cid: {})", client_id);
                     while let Some(row) = event_rows.next()? {
+                        debug!("Found a row! (cid: {}, row_count: {})", client_id, row_count + 1);
                         let first_event_elapsed = filter_start.elapsed();
                         slow_first_event = first_event_elapsed >= slow_cutoff;
                         if first_result {
@@ -501,6 +513,7 @@ impl NostrRepo for SqliteRepo {
                             .ok();
                         last_successful_send = Instant::now();
                     }
+                    debug!("Finished processing all rows for filter (cid: {}, total_rows: {})", client_id, row_count);
                     metrics
                         .query_db
                         .observe(filter_start.elapsed().as_secs_f64());
@@ -979,19 +992,32 @@ fn query_from_filter(f: &ReqFilter) -> (String, Vec<Box<dyn ToSql>>, Option<Stri
         .as_ref()
         .map_or_else(|| "".to_owned(), |i| format!("INDEXED BY {i}"));
     let mut query = format!("SELECT e.content FROM event e {idx_stmt}");
+
     // query parameters for SQLite
     let mut params: Vec<Box<dyn ToSql>> = vec![];
 
     // individual filter components (single conditions such as an author or event ID)
     let mut filter_components: Vec<String> = Vec::new();
+
     // Query for "authors", allowing prefix matches
     if let Some(authvec) = &f.authors {
         // take each author and convert to a hexsearch
         let mut auth_searches: Vec<String> = vec![];
         for auth in authvec {
             auth_searches.push("author=?".to_owned());
-            let auth_bin = hex::decode(auth).ok();
-            params.push(Box::new(auth_bin));
+            // Ensure hex string is lowercase before decoding
+            let auth_lower = auth.to_lowercase();
+            let auth_bin = hex::decode(&auth_lower);
+            match &auth_bin {
+                Ok(bytes) => {
+                    debug!("Successfully decoded author hex: {} -> {} bytes", auth, bytes.len());
+                    params.push(Box::new(auth_bin.ok()));
+                }
+                Err(e) => {
+                    warn!("Failed to decode author hex: {} - error: {}", auth, e);
+                    params.push(Box::new(None::<Vec<u8>>));
+                }
+            }
         }
         if !authvec.is_empty() {
             let auth_clause = format!("({})", auth_searches.join(" OR "));
@@ -1000,6 +1026,7 @@ fn query_from_filter(f: &ReqFilter) -> (String, Vec<Box<dyn ToSql>>, Option<Stri
             filter_components.push("false".to_owned());
         }
     }
+
     // Query for Kind
     if let Some(ks) = &f.kinds {
         // kind is number, no escaping needed
@@ -1007,6 +1034,7 @@ fn query_from_filter(f: &ReqFilter) -> (String, Vec<Box<dyn ToSql>>, Option<Stri
         let kind_clause = format!("kind IN ({})", str_kinds.join(", "));
         filter_components.push(kind_clause);
     }
+
     // Query for event, allowing prefix matches
     if let Some(idvec) = &f.ids {
         // take each author and convert to a hexsearch
@@ -1025,6 +1053,7 @@ fn query_from_filter(f: &ReqFilter) -> (String, Vec<Box<dyn ToSql>>, Option<Stri
             filter_components.push(id_clause);
         }
     }
+
     // Query for tags
     if let Some(map) = &f.tags {
         for (key, val) in map.iter() {
@@ -1068,26 +1097,45 @@ fn query_from_filter(f: &ReqFilter) -> (String, Vec<Box<dyn ToSql>>, Option<Stri
             filter_components.push(tag_clause);
         }
     }
+
     // Query for timestamp
     if f.since.is_some() {
         let created_clause = format!("created_at >= {}", f.since.unwrap());
         filter_components.push(created_clause);
     }
+
     // Query for timestamp
     if f.until.is_some() {
         let until_clause = format!("created_at <= {}", f.until.unwrap());
         filter_components.push(until_clause);
     }
+
+    // Query for search
+    if let Some(search) = &f.search {
+        if !search.trim().is_empty() {
+            let search_param = format!("%{}%", search);
+            filter_components.push("content LIKE ? COLLATE NOCASE".to_string());
+            debug!("Search filter applied: {}", search_param);
+            params.push(Box::new(search_param));
+        }
+    }
+
     // never display hidden events
     query.push_str(" WHERE hidden!=TRUE");
+
     // never display hidden events
     filter_components.push("(expires_at IS NULL OR expires_at > ?)".to_string());
     params.push(Box::new(unix_time()));
+
     // build filter component conditions
     if !filter_components.is_empty() {
         query.push_str(" AND ");
         query.push_str(&filter_components.join(" AND "));
     }
+    debug!("Generated SQL: {}", query);
+    debug!("SQL Params Count: {}", params.len());
+    debug!("Current unix_time: {}", unix_time());
+
     // Apply per-filter limit to this subquery.
     // The use of a LIMIT implies a DESC order, to capture only the most recent events.
     if let Some(lim) = f.limit {
@@ -1139,7 +1187,7 @@ pub fn build_pool(
 ) -> SqlitePool {
     let db_dir = &settings.database.data_directory;
     let full_path = Path::new(db_dir).join(DB_FILE);
-
+    info!("Opening DB at path: {:?}", full_path);
     // small hack; if the database doesn't exist yet, that means the
     // writer thread hasn't finished.  Give it a chance to work.  This
     // is only an issue with the first time we run.
